@@ -556,3 +556,4 @@ void resources_init(std::string engine_name) {
          p ->elem = detection_array;
          return p;
      }
+     }
