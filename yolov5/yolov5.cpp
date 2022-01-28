@@ -24,6 +24,17 @@ const char* INPUT_BLOB_NAME = "data";
 const char* OUTPUT_BLOB_NAME = "prob";
 static Logger gLogger;
 
+void* BUFFERS[2];
+ IExecutionContext* CONTEXT;
+ ICudaEngine* ENGINE;
+ IRuntime* RUNTIME;
+ cudaStream_t STREAM;
+
+ struct Detection {
+     float* elem;
+     int size;
+ };
+
 static int get_width(int x, float gw, int divisor = 8) {
     return int(ceil((x * gw) / divisor)) * divisor;
 }
