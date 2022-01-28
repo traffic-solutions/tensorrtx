@@ -444,3 +444,104 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
+
+void resources_init(std::string engine_name) {
+     cudaSetDevice(DEVICE);
+     // deserialize the .engine and run inference
+     std::ifstream file(engine_name, std::ios::binary);
+     if (!file.good()) {
+         std::cerr << "read " << engine_name << " error!" << std::endl;
+     }
+
+     char *trtModelStream = nullptr;
+     size_t size = 0;
+     file.seekg(0, file.end);
+     size = file.tellg();
+     file.seekg(0, file.beg);
+     trtModelStream = new char[size];
+     assert(trtModelStream);
+     file.read(trtModelStream, size);
+     file.close();
+     std::cout<<"start initializing....."<<std::endl;
+     RUNTIME = createInferRuntime(gLogger);
+     assert(RUNTIME != nullptr);
+     ENGINE = RUNTIME->deserializeCudaEngine(trtModelStream, size);
+     assert(ENGINE != nullptr);
+     CONTEXT = ENGINE->createExecutionContext();
+     assert(CONTEXT != nullptr);
+     delete[] trtModelStream;
+     assert(ENGINE->getNbBindings() == 2);
+
+     // In order to bind the buffers, we need to know the names of the input and output tensors.
+     // Note that indices are guaranteed to be less than IEngine::getNbBindings()
+     const int inputIndex = ENGINE->getBindingIndex(INPUT_BLOB_NAME);
+     const int outputIndex = ENGINE->getBindingIndex(OUTPUT_BLOB_NAME);
+     assert(inputIndex == 0);
+     assert(outputIndex == 1);
+     // Create GPU buffers on device
+     CUDA_CHECK(cudaMalloc(&BUFFERS[inputIndex], BATCH_SIZE * 3 * INPUT_H * INPUT_W * sizeof(float)));
+     CUDA_CHECK(cudaMalloc(&BUFFERS[outputIndex], BATCH_SIZE * OUTPUT_SIZE * sizeof(float)));
+     CUDA_CHECK(cudaStreamCreate(&STREAM));
+     std::cout<<"initialized....."<<std::endl;
+ }
+
+ void resources_destroy() {
+     std::cout<<"start destroying....."<<std::endl;
+     cudaStreamDestroy(STREAM);
+     CUDA_CHECK(cudaFree(BUFFERS[0]));
+     CUDA_CHECK(cudaFree(BUFFERS[1]));
+     CONTEXT -> destroy();
+     ENGINE ->destroy();
+     RUNTIME ->destroy();
+     std::cout<<"destroyed....."<<std::endl;
+ }
+
+ extern "C" {
+     void initialize(char* engine_name) {
+         resources_init(engine_name);
+     }
+     void destroy() {
+         resources_destroy();
+     }
+     Detection* detect_img(int rows, int cols, unsigned char* imgData, float conf_thresh, float nms_thresh) {
+         cv::Mat img = cv::Mat(rows, cols, CV_8UC3, imgData);
+         cv::Mat pr_img = preprocess_img(img, INPUT_W, INPUT_H);
+         static float data[BATCH_SIZE * 3 * INPUT_H * INPUT_W];
+         static float prob[BATCH_SIZE * OUTPUT_SIZE];
+         int i = 0;
+         for (int row = 0; row < INPUT_H; ++row) {
+             uchar* uc_pixel = pr_img.data + row * pr_img.step;
+             for (int col = 0; col < INPUT_W; ++col) {
+                 data[0 * 3 * INPUT_H * INPUT_W + i] = (float)uc_pixel[2] / 255.0;
+                 data[0 * 3 * INPUT_H * INPUT_W + i + INPUT_H * INPUT_W] = (float)uc_pixel[1] / 255.0;
+                 data[0 * 3 * INPUT_H * INPUT_W + i + 2 * INPUT_H * INPUT_W] = (float)uc_pixel[0] / 255.0;
+                 uc_pixel += 3;
+                 ++i;
+             }
+         }
+         auto start = std::chrono::system_clock::now();
+         doInference(*CONTEXT, STREAM, BUFFERS, data, prob, BATCH_SIZE);
+         auto end = std::chrono::system_clock::now();
+         std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms" << std::endl;
+         // std::vector<std::vector<Yolo::Detection>> batch_res(1);
+         std::vector<Yolo::Detection> res;
+         nms(res, &prob[0 * OUTPUT_SIZE], conf_thresh, nms_thresh);
+
+         std::vector<float> detection_vector;
+         for (size_t j = 0; j < res.size(); j++) {
+             for (int i = 0; i < 4; i++) {
+                 detection_vector.push_back(res[j].bbox[i]);
+             }
+             detection_vector.push_back(res[j].conf);
+             detection_vector.push_back(res[j].class_id);
+
+         }
+         static Detection detection_struct;
+         static Detection* p = &detection_struct;
+         p ->size = detection_vector.size();
+         static float* detection_array = new float[res.size() * 6];
+         std::memcpy(detection_array, &detection_vector[0], detection_vector.size() * sizeof(detection_vector[0]));
+         p ->elem = detection_array;
+         return p;
+     }
