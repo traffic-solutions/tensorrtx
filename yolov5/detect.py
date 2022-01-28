@@ -69,7 +69,7 @@ class YOLOV5TRT(object):
         result_boxes = pred[:, :4] if len(pred) else np.array([])
         result_scores = pred[:, 4] if len(pred) else np.array([])
         result_classid = pred[:, 5] if len(pred) else np.array([])
-        if not result_boxes:
+        if not any(result_boxes):
             return [], [], []
         result_boxes = self.xywh2xyxy(img.shape[0], img.shape[1], result_boxes)
         result_boxes = result_boxes.astype(np.int)
