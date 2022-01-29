@@ -54,8 +54,7 @@ class YOLOV5TRT(object):
         result_boxes = self.xywh2xyxy(img.shape[0], img.shape[1], result_boxes)
         result_boxes = result_boxes.astype(np.int)
         result_classid = result_classid.astype(np.int)
-        return result_boxes.tolist(), result_scores.tolist(), [
-            self.categories[class_id] for class_id in list(result_classid)]
+        return result_boxes.tolist(), result_scores.tolist(), result_classid.tolist()
 
     def destroy(self):
         self.detector.destroy()
