@@ -5,9 +5,7 @@ import ctypes
 import threading
 import numpy as np
 from numpy import random
-
-
-YOLOV5_PATH = os.path.dirname(os.path.abspath(__file__))
+from configuration_files.crossings import *
 
 
 class Result(ctypes.Structure):
@@ -16,41 +14,23 @@ class Result(ctypes.Structure):
 
 class COCOConfigTRT:
     # TODO: Make a class like this for our custom model
-    class_name = ["person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
-                  "traffic light",
-                  "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-                  "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase",
-                  "frisbee",
-                  "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
-                  "surfboard",
-                  "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
-                  "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
-                  "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard",
-                  "cell phone",
-                  "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-                  "teddy bear",
-                  "hair drier", "toothbrush"]
-    engine_path = os.path.join(YOLOV5_PATH, 'build', 'yolov5m.engine')
-    execute_file = os.path.join(YOLOV5_PATH, 'build', 'yolov5')
-    score_thr = 0.5
+    class_name = ACCEPTABLE_CLASSES
+    engine_path = YOLOV5_ENGINE_PATH
+    execute_file = os.path.join(TENSORRTX_PATH, 'yolov5', 'build', 'yolov5')
+    score_thr = YOLO_CONFIDENCE
     iou_thr = 0.5
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in class_name]
 
 
 class YOLOV5TRT(object):
     def __init__(self, config):
-        self.input_h = 640
-        self.input_w = 640
-        # load config
-        # self.plugin_library = config.plugin_library
+        self.input_h = YOLO_SIZE
+        self.input_w = YOLO_SIZE
         self.engine_file_path = config.engine_path
         self.excute_file = config.execute_file
         self.categories = config.class_name
         self.score_thr = config.score_thr
         self.iou_thr = config.iou_thr
-        self.setup()
-
-    def setup(self):
         self.engine_strBuffer = ctypes.create_string_buffer(bytes(self.engine_file_path, 'utf-8'))
         self.detector = ctypes.cdll.LoadLibrary(self.excute_file)
         self.detector.detect_img.restype = ctypes.POINTER(Result)
@@ -69,13 +49,13 @@ class YOLOV5TRT(object):
         result_boxes = pred[:, :4] if len(pred) else np.array([])
         result_scores = pred[:, 4] if len(pred) else np.array([])
         result_classid = pred[:, 5] if len(pred) else np.array([])
-        print(result_boxes, type(result_boxes))
         if not np.any(result_boxes):
             return [], [], []
         result_boxes = self.xywh2xyxy(img.shape[0], img.shape[1], result_boxes)
         result_boxes = result_boxes.astype(np.int)
         result_classid = result_classid.astype(np.int)
-        return result_boxes.tolist(), result_scores.tolist(), result_classid.tolist()
+        return result_boxes.tolist(), result_scores.tolist(), [
+            self.categories[class_id] for class_id in list(result_classid)]
 
     def destroy(self):
         self.detector.destroy()
